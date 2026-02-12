@@ -1,3 +1,5 @@
+# Taken from https://github.com/xmed-lab/TAM/blob/main/tam.py
+
 import os, torch, cv2, subprocess
 import fitz
 import numpy as np
