@@ -1,48 +1,78 @@
+import io
+import json
+import re
+from typing import Any, Dict, Optional, Tuple
+from datasets import Dataset
+from PIL import Image
+
+def decode_image_bytes(image_bytes: bytes) -> Image.Image:
+    return Image.open(io.BytesIO(image_bytes)).convert("RGB")
+
+
 def build_prompt(task_prompt: str, schema: Dict[str, Any]) -> str:
-    return f"""
-{task_prompt}
+    keys_block = json.dumps({k: None for k in schema.keys()}, indent=2)
+    return (
+        f"{task_prompt}\n\n"
+        f"Return a JSON object with EXACTLY these keys:\n{keys_block}\n\n"
+        "Rules:\n"
+        "- If a value is not present in the image, use null\n"
+        "- Do NOT guess or hallucinate values\n"
+        "- Output JSON only, no extra text"
+    )
 
-Return a JSON object with EXACTLY these keys:
-{json.dumps(schema, indent=2)}
+def parse_json(text: str) -> Tuple[Optional[Dict], bool]:
+    if isinstance(text, list):
+        text = text[0]
+    text = text.replace("assistant\n", "").replace("user\n", "").strip()
 
-Rules:
-- If a value is not present, return null
-- Do NOT guess
-- Output JSON only
-"""
+    codeblock = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if codeblock:
+        try:
+            return json.loads(codeblock.group(1)), True
+        except Exception:
+            pass
 
-def parse_json(text: str):
-    try:
-        start = text.index("{")
-        end = text.rindex("}") + 1
-        return json.loads(text[start:end]), True
-    except Exception:
+    start = text.find("{")
+    if start == -1:
         return None, False
 
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                candidate = text[start : i + 1]
+                try:
+                    return json.loads(candidate), True
+                except Exception:
+                    pass
 
-def score_fields(pred, gt):
-    scores = {}
-    for k in gt.keys():
-        if pred is None:
-            scores[k] = "invalid"
-        elif pred.get(k) is None and gt[k] is None:
+    return None, False
+
+def score_fields(
+    pred: Optional[Dict],
+    gt: Dict,
+    parse_ok: bool = True,
+) -> Dict[str, str]:
+    scores: Dict[str, str] = {}
+    for k, gt_val in gt.items():
+        if not parse_ok or pred is None:
+            scores[k] = "parse_error"
+        elif pred.get(k) is None and gt_val is None:
             scores[k] = "correct_null"
-        elif pred.get(k) == gt[k]:
+        elif pred.get(k) == gt_val:
             scores[k] = "correct"
-        elif pred.get(k) is not None and gt[k] is None:
+        elif pred.get(k) is not None and gt_val is None:
             scores[k] = "hallucination"
-        elif pred.get(k) is None and gt[k] is not None:
+        elif pred.get(k) is None and gt_val is not None:
             scores[k] = "miss"
         else:
             scores[k] = "wrong"
     return scores
 
-def extract_logits(model, outputs, sample_idx):
-    return np.stack([
-        model.lm_head(h[sample_idx]).cpu().numpy()
-        for h in outputs.hidden_states
-    ])
 
-def push_dataset(records, repo_id):
+def push_dataset(records, repo_id: str) -> None:
     ds = Dataset.from_list(records)
     ds.push_to_hub(repo_id)
