@@ -19,8 +19,8 @@ This is quantified by the **spatial density reward**:
 
 ```bash
 # Install dependencies (on the remote GPU machine)
-pip install git+https://github.com/huggingface/transformers
-pip install mistral-common[opencv] accelerate datasets scipy PyMuPDF opencv-python tqdm
+uv pip install git+https://github.com/huggingface/transformers
+uv pip install mistral-common[opencv] accelerate datasets scipy PyMuPDF opencv-python tqdm
 
 # Run Ministral on 5 samples
 cd src
