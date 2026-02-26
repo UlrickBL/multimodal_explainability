@@ -494,7 +494,25 @@ def TAM(tokens, vision_shape, logit_list, special_ids, vision_input, \
     
     # if img_id is a int, take all tokens same to this id
     if len(img_id) == 1:
-        img_idx = (np.array(tokens) == img_id[0]).nonzero()[0]
+        # Find the actual continuous block of vision tokens to avoid 
+        # picking up random occurrences of the token ID elsewhere in the prompt
+        import numpy as np
+        target_val = img_id[0]
+        matches = (np.array(tokens) == target_val).astype(int)
+        
+        # Find longest continuous run of 1s
+        if matches.sum() > 0:
+            padded = np.pad(matches, (1, 1), mode='constant')
+            diffs = np.diff(padded)
+            starts = np.where(diffs == 1)[0]
+            ends = np.where(diffs == -1)[0]
+            lengths = ends - starts
+            best_idx = np.argmax(lengths)
+            start_pos = starts[best_idx]
+            end_pos = ends[best_idx]
+            img_idx = np.arange(start_pos, end_pos)
+        else:
+            img_idx = np.array([])
     else:
         img_idx = [id2idx(tokens, img_id[0], True), id2idx(tokens, img_id[1])]
 

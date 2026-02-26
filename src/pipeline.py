@@ -263,6 +263,16 @@ def run_pipeline(
         tokens: List[int] = seq.cpu().tolist()
 
         print(f"[{sample_id}] Running TAM for {len(logits)} generation steps …")
+        
+        special_ids = (
+            SPECIAL_IDS_QWEN
+            if backend == "qwen"
+            else _get_ministral_special_ids(processor, tokens)
+        )
+        img_tok = special_ids["img_id"][0]
+        img_count = tokens.count(img_tok)
+        print(f"DEBUG: img_tok={img_tok}, in tokens={img_count}, total_tokens={len(tokens)}, vision_shape={vision_shape}, expected_img_tokens={vision_shape[0]*vision_shape[1]}")
+
         tam_maps = run_tam_for_sample(
             tokens=tokens,
             vision_shape=vision_shape,
