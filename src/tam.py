@@ -494,23 +494,25 @@ def TAM(tokens, vision_shape, logit_list, special_ids, vision_input, \
     
     # if img_id is a int, take all tokens same to this id
     if len(img_id) == 1:
-        # Find the actual continuous block of vision tokens to avoid 
-        # picking up random occurrences of the token ID elsewhere in the prompt
+        # Find all vision tokens, ignoring interstitial separators between rows
         import numpy as np
         target_val = img_id[0]
-        matches = (np.array(tokens) == target_val).astype(int)
+        all_matches = np.where(np.array(tokens) == target_val)[0]
         
-        # Find longest continuous run of 1s
-        if matches.sum() > 0:
-            padded = np.pad(matches, (1, 1), mode='constant')
-            diffs = np.diff(padded)
-            starts = np.where(diffs == 1)[0]
-            ends = np.where(diffs == -1)[0]
-            lengths = ends - starts
-            best_idx = np.argmax(lengths)
-            start_pos = starts[best_idx]
-            end_pos = ends[best_idx]
-            img_idx = np.arange(start_pos, end_pos)
+        # If the image token is common (like 10), we might have random occurrences.
+        # But the vision block is huge (e.g., 1000+ tokens) and dense.
+        # We can find the densest cluster by looking for the start and end of the block.
+        if len(all_matches) > 0:
+            # We assume the image is the largest cluster. 
+            # We can find where the density of target tokens is very high.
+            # A simple way: find the sequence of matches that are close to each other.
+            diffs = np.diff(all_matches)
+            # Find big gaps (e.g. > 10 tokens apart)
+            break_points = np.where(diffs > 10)[0]
+            
+            splits = np.split(all_matches, break_points + 1)
+            best_split = max(splits, key=len)
+            img_idx = best_split
         else:
             img_idx = np.array([])
     else:
