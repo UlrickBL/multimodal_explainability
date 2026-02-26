@@ -585,14 +585,15 @@ def TAM(tokens, vision_shape, logit_list, special_ids, vision_input, \
         txt_scores_ = txt_scores[non_repeat_idx]
         img_scores_list_ = [img_scores_list[_] for _ in non_repeat_idx]
 
-        # get the interference map of ECI
-        w = txt_scores_
-        w = w / (w.sum() + 1e-8)
-        interf_img_scores = (np.stack(img_scores_list_, 0) * w.reshape(-1, 1)).sum(0)
+        if len(non_repeat_idx) > 0:
+            # get the interference map of ECI
+            w = txt_scores_
+            w = w / (w.sum() + 1e-8)
+            interf_img_scores = (np.stack(img_scores_list_, 0) * w.reshape(-1, 1)).sum(0)
 
-        # apply ECI with the least squares method and relu
-        scaled_map = least_squares(img_scores, interf_img_scores)
-        img_scores = (img_scores - interf_img_scores * scaled_map).clip(min=0)
+            # apply ECI with the least squares method and relu
+            scaled_map = least_squares(img_scores, interf_img_scores)
+            img_scores = (img_scores - interf_img_scores * scaled_map).clip(min=0)
 
     # prepare raw vision input
     if isinstance(vision_shape[0], tuple):
