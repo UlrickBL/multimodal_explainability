@@ -226,11 +226,14 @@ def _run_ministral(image, prompt, model, processor, max_new_tokens):
     )
 
     # vision_shape: number of vision tokens ≈ (H_pixels/patch, W_pixels/patch)
-    # Ministral-3 uses 14-pixel patches
+    # Ministral-3 / Pixtral uses a 14x14 patch and merges them 2x2.
     PATCH = 14
     if image_sizes:
+        import math
         h_px, w_px = image_sizes[0]
-        vision_shape = (int(h_px) // PATCH, int(w_px) // PATCH)
+        h_patches = math.ceil(h_px / PATCH)
+        w_patches = math.ceil(w_px / PATCH)
+        vision_shape = (math.ceil(h_patches / 2), math.ceil(w_patches / 2))
     else:
         vision_shape = (16, 16)  # fallback
 
