@@ -26,10 +26,15 @@ SPECIAL_IDS_QWEN: Dict[str, Any] = {
 
 def _get_ministral_special_ids(processor, tokens: List[int]) -> Dict[str, Any]:
     try:
-        img_start_id = processor.encode("[IMG]")[0]
-        img_end_id   = processor.encode("[/IMG]")[0]
+        encoded_img = processor.encode("[IMG]")
+        if len(encoded_img) == 1:
+            img_start_id = encoded_img[0]
+            img_end_id   = encoded_img[0]
+        else:
+            img_start_id = img_end_id = None
     except Exception:
         img_start_id = img_end_id = None
+
     try:
         inst_start_id = processor.encode("[INST]")[-1]
         inst_end_id   = processor.encode("[/INST]")[0]
@@ -37,9 +42,22 @@ def _get_ministral_special_ids(processor, tokens: List[int]) -> Dict[str, Any]:
         inst_start_id = inst_end_id = None
 
     if img_start_id is None or img_start_id not in tokens:
-        cnt = Counter(tokens)
-        img_tok = cnt.most_common(1)[0][0] if cnt else 10
-        img_start_id = img_tok
+        max_run = 0
+        img_tok = 10
+        curr_run = 0
+        curr_tok = None
+        for t in tokens:
+            if t == curr_tok:
+                curr_run += 1
+            else:
+                if curr_run > max_run:
+                    max_run = curr_run
+                    img_tok = curr_tok
+                curr_tok = t
+                curr_run = 1
+        if curr_run > max_run:
+            img_tok = curr_tok
+        img_start_id = img_end_id = img_tok
 
     if inst_start_id is None:
         inst_start_id = tokens[0]
