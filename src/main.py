@@ -29,7 +29,7 @@ TASK_INSTRUCTION = (
 PROMPT = build_prompt(TASK_INSTRUCTION, RECEIPT_SCHEMA)
 
 MODEL_MINISTRAL = "mistralai/Ministral-3-3B-Instruct-2512"
-MODEL_QWEN      = "Qwen/Qwen2.5-VL-3B-Instruct"   # or Qwen3-VL-2B-Instruct
+MODEL_QWEN      = "Qwen/Qwen3-VL-2B-Instruct"
 
 def load_samples(max_samples=None):
     raw_ds = load_dataset(DATASET_ID, split=DATASET_SPLIT)

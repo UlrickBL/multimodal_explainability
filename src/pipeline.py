@@ -277,7 +277,7 @@ def run_pipeline(
             tokens=tokens,
             vision_shape=vision_shape,
             logits=logits,
-            vision_images=vision_images,
+            vision_images=[raw_image],  # use original PIL image per sample, not processed image_inputs
             processor=processor,
             backend=backend,
             sample_dir=(sample_dir if save_token_overlays else Path("")),
