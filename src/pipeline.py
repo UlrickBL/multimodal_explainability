@@ -110,13 +110,21 @@ def run_tam_for_sample(
                 eval_only=(not save_overlays),
             )
         except Exception as e:
+            import traceback
             print(f"  [TAM] step {step} failed: {e}")
+            traceback.print_exc()
             img_map = np.zeros(vision_shape, dtype=np.uint8)
 
         if img_map is None:
             img_map = np.zeros(vision_shape, dtype=np.uint8)
 
-        tam_maps.append(np.array(img_map, dtype=np.uint8))
+        arr = np.array(img_map, dtype=np.uint8)
+        print(
+            f"  [TAM] step {step:04d}/{n_steps}: "
+            f"shape={arr.shape} mean={arr.mean():.3f} "
+            f"max={arr.max():3d} std={arr.std():.3f}"
+        )
+        tam_maps.append(arr)
 
     return tam_maps
 
@@ -127,13 +135,32 @@ def _find_value_token_span(
     prompt_len: int,
     processor,
 ) -> Tuple[int, int]:
+    """Locate the token span of *value* in the generated sequence.
+
+    Tries multiple ways to tokenize the value string to handle both Qwen's
+    AutoProcessor (which exposes `.tokenizer`) and bare tokenizer objects.
+    """
     if value is None:
         return -1, -1
 
     value_str = str(value)
-    try:
-        val_ids: List[int] = processor.encode(value_str)
-    except Exception:
+
+    # Try to obtain token ids through the available API surface.
+    val_ids: Optional[List[int]] = None
+    for encode_fn in [
+        lambda s: processor.tokenizer.encode(s, add_special_tokens=False),
+        lambda s: processor.encode(s, add_special_tokens=False),
+        lambda s: processor.tokenizer.encode(s),
+        lambda s: processor.encode(s),
+    ]:
+        try:
+            val_ids = encode_fn(value_str)
+            if val_ids:
+                break
+        except Exception:
+            continue
+
+    if not val_ids:
         return -1, -1
 
     n = len(val_ids)
@@ -152,10 +179,16 @@ def compute_key_tam_maps(
     tam_maps: List[np.ndarray],
     processor,
 ) -> Dict[str, Dict]:
+    """Map each predicted key→value to the TAM maps for its generated token span.
+
+    If the token span for a key's value cannot be located, the key is skipped
+    (not assigned a fallback that would be identical to every other failed key).
+    """
     if not pred_struct:
         return {}
 
     results: Dict[str, Dict] = {}
+    n_maps = len(tam_maps)
 
     for key, value in pred_struct.items():
         start, end = _find_value_token_span(
@@ -163,19 +196,39 @@ def compute_key_tam_maps(
         )
 
         if start == -1 or end <= start:
-            # Value tokens not found — use all maps as fallback
-            maps_for_key = tam_maps
-        else:
-            # generated steps are 0-indexed; step i corresponds to token prompt_len+i
-            gen_start = start - prompt_len
-            gen_end   = end   - prompt_len
-            # Clamp to available maps
-            gen_start = max(0, min(gen_start, len(tam_maps) - 1))
-            gen_end   = max(gen_start + 1, min(gen_end, len(tam_maps)))
-            maps_for_key = tam_maps[gen_start:gen_end]
+            print(f"  [KEY_TAM] '{key}' = {value!r:30s} → span NOT FOUND – skipping")
+            continue
+
+        # generated steps are 0-indexed: step i was produced at position prompt_len+i
+        gen_start = start - prompt_len
+        gen_end   = end   - prompt_len
+        # Clamp to available maps
+        gen_start = max(0, min(gen_start, n_maps - 1))
+        gen_end   = max(gen_start + 1, min(gen_end, n_maps))
+        maps_for_key = tam_maps[gen_start:gen_end]
+
+        print(
+            f"  [KEY_TAM] '{key}' = {value!r:30s} "
+            f"→ abs span [{start},{end}), gen steps [{gen_start},{gen_end}), "
+            f"{len(maps_for_key)} map(s)"
+        )
+        # Log per-map stats so the user can verify variance
+        for si, m in enumerate(maps_for_key):
+            arr = m.astype(np.float32)
+            print(
+                f"           step {gen_start+si:04d}: "
+                f"mean={arr.mean():.4f} max={arr.max():.4f} std={arr.std():.4f}"
+            )
 
         additive = compute_additive_map(maps_for_key)
         reward   = compute_density_reward(additive.astype(np.float32))
+
+        arr_add = additive.astype(np.float32)
+        print(
+            f"           additive map: "
+            f"mean={arr_add.mean():.4f} max={arr_add.max():.4f} "
+            f"density_reward={reward:.4f}"
+        )
 
         results[key] = {
             "additive_map":   additive,
