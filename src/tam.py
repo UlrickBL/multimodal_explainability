@@ -495,7 +495,6 @@ def TAM(tokens, vision_shape, logit_list, special_ids, vision_input, \
     # if img_id is a int, take all tokens same to this id
     if len(img_id) == 1:
         # Find all vision tokens, ignoring interstitial separators between rows
-        import numpy as np
         target_val = img_id[0]
         all_matches = np.where(np.array(tokens) == target_val)[0]
         
