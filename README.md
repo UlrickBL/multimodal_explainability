@@ -18,15 +18,11 @@ This is quantified by the **spatial density reward**:
 uv pip install git+https://github.com/huggingface/transformers
 uv pip install mistral-common[opencv] accelerate datasets scipy PyMuPDF opencv-python tqdm
 
-# Run Ministral on 5 samples
-cd src
-python main.py --model ministral --max_samples 5 --output_dir ./output
+# Run on InfoVQA with Qwen
+python src/main.py --dataset infovqa --model qwen --max_samples 5
 
-# Run QwenVL on 10 samples
-python main.py --model qwen --max_samples 10 --output_dir ./output_qwen
-
-# Run both, also save per-token overlays (disk-intensive!)
-python main.py --model both --max_samples 5 --save_token_overlays --output_dir ./both_output
+# Run original receipt extraction
+python src/main.py --dataset receipt --model ministral
 ```
 
 ### Record schema
