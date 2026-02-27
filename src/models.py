@@ -18,25 +18,12 @@ except ImportError:
 
 from qwen_utils import process_vision_info
 
-
-# ─── PIL → base64 helper (needed for Ministral image encoding) ────────────
-
 def pil_to_base64(image: Image.Image, fmt: str = "JPEG") -> str:
     buf = BytesIO()
     image.save(buf, format=fmt)
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
-
-# ─── MistralTokenizerAdapter ─────────────────────────────────────────────
-#
-# TAM() internally calls:
-#   processor.tokenizer.tokenize(text, skip_special_tokens=False, ...)
-#   processor.batch_decode([[id], ...])
-#
-# MistralCommonBackend already has batch_decode / decode.
-# We proxy `.tokenizer` as a small inner object that provides `.tokenize()`.
-
-
+# TODO : not working with Mistral, all outputs are the same, check tokenizer and special tokens
 class _MistralTokenizerProxy:
     """Inner proxy: makes `processor.tokenizer.tokenize(text)` work."""
 
@@ -62,8 +49,6 @@ class MistralTokenizerAdapter:
         self._backend = backend
         self.tokenizer = _MistralTokenizerProxy(backend)
 
-    # ── Delegation ──────────────────────────────────────────────────────────
-
     def apply_chat_template(self, messages, **kwargs):
         return self._backend.apply_chat_template(messages, **kwargs)
 
@@ -76,18 +61,11 @@ class MistralTokenizerAdapter:
     def encode(self, text, **kwargs):
         return self._backend.encode(text, **kwargs)
 
-    # Allow attribute pass-through for anything else
     def __getattr__(self, name: str):
         return getattr(self._backend, name)
 
 
-# ─── Model Loading ────────────────────────────────────────────────────────
-
 def load_vl_model(model_id: str) -> Dict[str, Any]:
-    """
-    Load a vision-language model and return a bundle dict:
-        {"model": ..., "processor": ..., "backend": "qwen" | "ministral"}
-    """
     if "Ministral" in model_id or "mistral" in model_id.lower():
         model = Mistral3ForConditionalGeneration.from_pretrained(
             model_id,
@@ -98,17 +76,12 @@ def load_vl_model(model_id: str) -> Dict[str, Any]:
         return {"model": model, "processor": processor, "backend": "ministral"}
 
     elif "Qwen" in model_id:
-        # Try Qwen3-VL first, fall back to Qwen2.5-VL
-        cls = Qwen3VLForConditionalGeneration or Qwen2_5_VLForConditionalGeneration
-        model = cls.from_pretrained(model_id, torch_dtype="auto", device_map="auto")
+        model = Qwen3VLForConditionalGeneration.from_pretrained(model_id, torch_dtype="auto", device_map="auto")
         processor = AutoProcessor.from_pretrained(model_id)
         return {"model": model, "processor": processor, "backend": "qwen"}
 
     else:
         raise ValueError(f"Unsupported model_id: {model_id!r}")
-
-
-# ─── Inference (single sample, no batching for TAM correctness) ──────────
 
 @torch.no_grad()
 def run_single_sample(
@@ -147,9 +120,6 @@ def run_single_sample(
     else:
         raise ValueError(f"Unknown backend: {backend!r}")
 
-
-# ─── Qwen backend ─────────────────────────────────────────────────────────
-
 def _run_qwen(image, prompt, model, processor, max_new_tokens):
     messages = [
         {
@@ -176,15 +146,11 @@ def _run_qwen(image, prompt, model, processor, max_new_tokens):
         return_dict_in_generate=True,
     )
 
-    # vision_shape: (H_tokens, W_tokens) after the 2× merge
-    grid = inputs["image_grid_thw"][0]  # (T, H, W) merging ratio
+    grid = inputs["image_grid_thw"][0]
     vision_shape = (int(grid[1]) // 2, int(grid[2]) // 2)
 
     logits = _extract_logits(model, outputs)
     return outputs, dict(inputs), image_inputs, vision_shape, logits
-
-
-# ─── Ministral backend ────────────────────────────────────────────────────
 
 def _run_ministral(image, prompt, model, processor, max_new_tokens):
     img_b64 = pil_to_base64(image)
@@ -211,7 +177,6 @@ def _run_ministral(image, prompt, model, processor, max_new_tokens):
         else:
             inputs[k] = v
 
-    # image_sizes: list of (H_pixels, W_pixels) for each image
     pixel_values = inputs.get("pixel_values")
     image_sizes = [pixel_values.shape[-2:]] if pixel_values is not None else []
 
@@ -227,6 +192,7 @@ def _run_ministral(image, prompt, model, processor, max_new_tokens):
 
     # vision_shape: number of vision tokens ≈ (H_pixels/patch, W_pixels/patch)
     # Ministral-3 / Pixtral uses a 14x14 patch and merges them 2x2.
+    # TODO : check that the implem for Ministral is correct 
     PATCH = 14
     if image_sizes:
         import math

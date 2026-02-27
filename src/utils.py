@@ -1,9 +1,53 @@
 import io
 import json
 import re
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from datasets import Dataset
 from PIL import Image
+
+
+def levenshtein_distance(a: str, b: str) -> int:
+    """Pure-Python Levenshtein distance (no external deps)."""
+    a, b = a.lower().strip(), b.lower().strip()
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        curr = [i]
+        for j, cb in enumerate(b, 1):
+            curr.append(min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = curr
+    return prev[-1]
+
+
+def score_vqa_answer(
+    pred: Optional[str],
+    references: List[str],
+    threshold: float = 0.4,
+) -> str:
+    """Score a VQA prediction against a list of reference answers.
+
+    Returns:
+        'correct'    – normalised Levenshtein ≤ threshold against at least one ref
+        'wrong'      – answer found but too different from all refs
+        'no_answer'  – pred is None or empty
+        'parse_error'– pred is not a string
+    """
+    if pred is None or (isinstance(pred, str) and not pred.strip()):
+        return "no_answer"
+    if not isinstance(pred, str):
+        return "parse_error"
+    pred_s = pred.lower().strip()
+    best = min(
+        levenshtein_distance(pred_s, ref) / max(len(pred_s), len(ref), 1)
+        for ref in references
+    )
+    return "correct" if best <= threshold else "wrong"
+
 
 def decode_image_bytes(image_bytes: bytes) -> Image.Image:
     return Image.open(io.BytesIO(image_bytes)).convert("RGB")

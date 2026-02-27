@@ -145,7 +145,6 @@ def _find_value_token_span(
 
     value_str = str(value)
 
-    # Try to obtain token ids through the available API surface.
     val_ids: Optional[List[int]] = None
     for encode_fn in [
         lambda s: processor.tokenizer.encode(s, add_special_tokens=False),
@@ -199,10 +198,8 @@ def compute_key_tam_maps(
             print(f"  [KEY_TAM] '{key}' = {value!r:30s} → span NOT FOUND – skipping")
             continue
 
-        # generated steps are 0-indexed: step i was produced at position prompt_len+i
         gen_start = start - prompt_len
         gen_end   = end   - prompt_len
-        # Clamp to available maps
         gen_start = max(0, min(gen_start, n_maps - 1))
         gen_end   = max(gen_start + 1, min(gen_end, n_maps))
         maps_for_key = tam_maps[gen_start:gen_end]
@@ -212,7 +209,6 @@ def compute_key_tam_maps(
             f"→ abs span [{start},{end}), gen steps [{gen_start},{gen_end}), "
             f"{len(maps_for_key)} map(s)"
         )
-        # Log per-map stats so the user can verify variance
         for si, m in enumerate(maps_for_key):
             arr = m.astype(np.float32)
             print(
@@ -272,6 +268,7 @@ def run_pipeline(
     max_new_tokens: int = 256,
     max_samples: Optional[int] = None,
     save_token_overlays: bool = False,
+    score_fn: Optional[Any] = None,
 ) -> List[Dict[str, Any]]:
     out_root = Path(output_dir)
     out_root.mkdir(parents=True, exist_ok=True)
@@ -309,8 +306,18 @@ def run_pipeline(
         generated_text = processor.decode(seq[prompt_len:], skip_special_tokens=True)
 
         pred_struct, parse_ok = parse_json(generated_text)
+        
+        # Scoring
         gt = sample.get("ground_truth", {})
-        field_scores = score_fields(pred_struct, gt, parse_ok=parse_ok)
+        if score_fn:
+            # New flexible scoring using raw row context
+            raw_row = sample.get("_raw_row", {})
+            field_scores = score_fn(pred_struct, raw_row)
+        else:
+            # Fallback for simple key-value matching
+            from utils import score_fields
+            field_scores = score_fields(pred_struct, gt, parse_ok=parse_ok)
+
         is_hallucinated = parse_ok and any(v == "hallucination" for v in field_scores.values())
 
         tokens: List[int] = seq.cpu().tolist()
@@ -330,7 +337,7 @@ def run_pipeline(
             tokens=tokens,
             vision_shape=vision_shape,
             logits=logits,
-            vision_images=[raw_image],  # use original PIL image per sample, not processed image_inputs
+            vision_images=[raw_image],
             processor=processor,
             backend=backend,
             sample_dir=(sample_dir if save_token_overlays else Path("")),
@@ -372,6 +379,7 @@ def run_pipeline(
             "model_id":              model_id,
             "vision_shape":          list(vision_shape),
             "n_generated_tokens":    len(logits),
+            "dataset":               sample.get("_dataset", "unknown"),
         }
         records.append(record)
 

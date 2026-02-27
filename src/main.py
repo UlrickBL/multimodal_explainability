@@ -4,58 +4,22 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from datasets import load_dataset
-from utils import build_prompt, decode_image_bytes, push_dataset
 from pipeline import run_pipeline
-
-DATASET_ID = "nanonets/key_information_extraction"
-DATASET_SPLIT = "test"
-
-RECEIPT_SCHEMA = {
-    "date":           None,   # DD/MM/YYYY
-    "doc_no":         None,   # receipt / invoice number
-    "seller_name":    None,
-    "seller_address": None,
-    "seller_gst_id":  None,
-    "seller_phone":   None,
-    "total_amount":   None,   # numeric string
-    "total_tax":      None,
-}
-
-TASK_INSTRUCTION = (
-    "You are a document understanding assistant. "
-    "Extract structured information from this receipt image."
-)
-PROMPT = build_prompt(TASK_INSTRUCTION, RECEIPT_SCHEMA)
+from datasets_cfg import load_samples, get_score_fn, DATASET_REGISTRY
 
 MODEL_MINISTRAL = "mistralai/Ministral-3-3B-Instruct-2512"
 MODEL_QWEN      = "Qwen/Qwen3-VL-2B-Instruct"
 
-def load_samples(max_samples=None):
-    raw_ds = load_dataset(DATASET_ID, split=DATASET_SPLIT)
-    if max_samples is not None:
-        raw_ds = raw_ds.select(range(min(max_samples, len(raw_ds))))
-
-    samples = []
-    for idx, row in enumerate(raw_ds):
-        gt = row.get("annotations") or row.get("ground_truth") or {}
-
-        image = row.get("image")
-        if isinstance(image, bytes):
-            image = decode_image_bytes(image)
-
-        samples.append({
-            "id":           str(idx),
-            "image":        image,
-            "prompt":       PROMPT,
-            "ground_truth": gt,
-        })
-
-    return samples
-
 
 def parse_args():
     p = argparse.ArgumentParser(description="TAM hallucination-detection pipeline")
+    
+    p.add_argument(
+        "--dataset",
+        choices=list(DATASET_REGISTRY.keys()),
+        default="receipt",
+        help=f"Dataset to run on. Available: {list(DATASET_REGISTRY.keys())}",
+    )
     p.add_argument(
         "--model",
         choices=["ministral", "qwen", "both"],
@@ -82,8 +46,12 @@ def parse_args():
 
 def main():
     args = parse_args()
-    samples = load_samples(max_samples=args.max_samples)
-    print(f"Loaded {len(samples)} samples from '{DATASET_ID}'.")
+    
+    # Dynamic loader based on CLI arg
+    samples = load_samples(args.dataset, max_samples=args.max_samples)
+    score_fn = get_score_fn(args.dataset)
+    
+    print(f"Loaded {len(samples)} samples for dataset '{args.dataset}'.")
 
     models_to_run = []
     if args.model in ("ministral", "both"):
@@ -93,20 +61,24 @@ def main():
 
     for name, model_id in models_to_run:
         print(f"\n{'='*60}")
-        print(f"Running model: {model_id}")
+        print(f"Running model: {model_id} on dataset: {args.dataset}")
         print(f"{'='*60}\n")
 
-        out_dir = Path(args.output_dir) / name
+        # Include dataset name in output path
+        out_root = Path(args.output_dir) / args.dataset / name
+        
         records = run_pipeline(
             samples=samples,
             model_id=model_id,
-            output_dir=str(out_dir),
+            output_dir=str(out_root),
             max_new_tokens=args.max_new_tokens,
             save_token_overlays=args.save_token_overlays,
+            score_fn=score_fn,
         )
 
         if args.push_to_hub:
-            repo_id = f"UlrickBL/tam-{name}-hallucination"
+            from utils import push_dataset
+            repo_id = f"UlrickBL/tam-{args.dataset}-{name}-hallucination"
             print(f"Pushing {len(records)} records to {repo_id} …")
             push_dataset(records, repo_id)
             print("Done.")
